@@ -65,9 +65,18 @@ function md(s){const cb=[];
 // Công cụ cho bot: bộ nhớ dạng file + nạp skill
 const TOOLS=[['memory_list','Liệt kê các file bộ nhớ',[]],['memory_read','Đọc một file bộ nhớ',['path']],
  ['memory_write','Tạo/ghi đè file bộ nhớ, dùng để lưu thông tin bền vững về người dùng',['path','content']],
- ['memory_delete','Xóa một file bộ nhớ',['path']],['load_skill','Nạp hướng dẫn đầy đủ của một skill',['name']]]
- .map(([name,description,r])=>({type:'function',function:{name,description,parameters:{type:'object',properties:Object.fromEntries(r.map(k=>[k,{type:'string'}])),required:r}}}));
-function run(n,a){
+ ['memory_delete','Xóa một file bộ nhớ',['path']],['load_skill','Nạp hướng dẫn đầy đủ của một skill',['name']],
+ ['file_list','Liệt kê các tệp người dùng đã đính kèm trong cuộc trò chuyện này',[]],
+ ['file_read','Đọc một đoạn của tệp đính kèm (start và length tính bằng byte, mặc định đọc 20000 byte từ đầu)',['name'],['start','length']],
+ ['file_search','Tìm chuỗi trong tệp đính kèm, trả về số dòng',['query'],['name']]]
+ .map(([name,description,r,o=[]])=>({type:'function',function:{name,description,parameters:{type:'object',properties:Object.fromEntries([...r,...o].map(k=>[k,{type:'string'}])),required:r}}}));
+async function run(n,a){
+ const fn=x=>cur?.files?.find(f=>f.name==x)||cur?.files?.find(f=>f.name.endsWith(x));
+ const B=async k=>{const v=await idb('get',k);return typeof v=='string'?new Blob([v]):v};
+ if(n=='file_list')return cur?.files?.map(f=>f.name+' — '+f.size+' byte').join('\n')||'(chưa có tệp)';
+ if(n=='file_read'){const f=fn(a.name);if(!f)return 'Không có tệp '+a.name;const b=await B(cur.id+'/'+f.name);if(!b)return 'Tệp không còn trong trình duyệt';const s=Math.max(0,+a.start||0),l=Math.min(+a.length||20000,40000);return (await b.slice(s,s+l).text())+'\n[byte '+s+'–'+Math.min(s+l,b.size)+' / '+b.size+']'}
+ if(n=='file_search'){const q=(a.query||'').toLowerCase(),r=[];for(const f of cur?.files||[]){if(a.name&&!f.name.includes(a.name))continue;const b=await B(cur.id+'/'+f.name);if(!b)continue;let off=0,ln=0,carry='';const hit=l=>{ln++;if(r.length<40&&l.toLowerCase().includes(q))r.push(f.name+':'+ln+': '+l.trim().slice(0,200))};
+  while(off<b.size&&r.length<40){const ls=(carry+await b.slice(off,off+4e6).text()).split('\n');off+=4e6;carry=ls.pop();ls.forEach(l=>hit(l))}if(carry&&r.length<40)hit(carry);if(r.length>=40)break}return r.join('\n')||'Không thấy kết quả'}
  if(n=='memory_list')return Object.keys(mem).map(k=>k+' ('+mem[k].length+' ký tự)').join('\n')||'(trống)';
  if(n=='memory_read')return mem[a.path]??'Không có file '+a.path;
  if(n=='memory_write'){mem[a.path]=a.content;S('mem',mem);return 'Đã lưu '+a.path}
@@ -76,6 +85,7 @@ function run(n,a){
  return 'Công cụ không tồn tại'}
 const sysPrompt=()=>[cfg.sys||'Bạn là trợ lý hữu ích. Trả lời bằng ngôn ngữ của người dùng.',
  'Bộ nhớ lâu dài gồm các file. Dùng memory_list/memory_read để xem, memory_write để lưu thông tin bền vững về người dùng (không lưu mật khẩu hay khóa API). Hiện có: '+(Object.keys(mem).join(', ')||'chưa có file nào')+'.',
+ cur?.files?.length?'Tệp người dùng đính kèm (phần chưa có trong tin nhắn thì đọc bằng file_list/file_read/file_search):\n'+cur.files.slice(0,50).map(f=>'- '+f.name+' ('+f.size+' byte)').join('\n')+(cur.files.length>50?'\n…và '+(cur.files.length-50)+' tệp khác':''):'',
  skills.some(s=>s.on!==false)?'Skills khả dụng, gọi load_skill khi yêu cầu khớp mô tả:\n'+skills.filter(s=>s.on!==false).map(s=>'- '+s.name+': '+s.desc).join('\n'):''].filter(Boolean).join('\n\n');
 
 async function turn(c){
@@ -98,13 +108,18 @@ async function send(){
  if(!cfg.model){openP('cfg');return}
  if(!cur){cur={id:Date.now(),title:(txt||pend[0].name).slice(0,40),msgs:[]};chats.unshift(cur)}
  let content=txt,t=txt;const files=[],imgs=[];
- for(const p of pend){if(p.img)imgs.push({type:'image_url',image_url:{url:p.img}});else{files.push(p.name);t+='\n\n[Tệp: '+p.name+']\n```\n'+p.text+'\n```'}}
+ cur.files??=[];
+ for(const p of pend){if(p.img){imgs.push({type:'image_url',image_url:{url:p.img}});continue}files.push(p.name);
+  const es=p.entries||[{name:p.name,blob:p.blob}];
+  for(const e of es){const nm=p.entries?p.name+'/'+e.name:e.name;const b=e.blob||new Blob([e.text]);await idb('put',b,cur.id+'/'+nm);cur.files=cur.files.filter(f=>f.name!=nm);cur.files.push({name:nm,size:b.size})}
+  if(p.entries)t+='\n\n[Zip: '+p.name+' — '+es.length+' tệp văn bản]\n'+es.slice(0,200).map(e=>p.name+'/'+e.name+' ('+e.text.length+')').join('\n')+(es.length>200?'\n…và '+(es.length-200)+' tệp khác':'')+'\nDùng file_list/file_read/file_search để đọc.';
+  else t+='\n\n[Tệp: '+p.name+' — '+p.blob.size+' byte]\n'+(p.blob.size<=3e4?'```\n'+await p.blob.text()+'\n```':(await p.blob.slice(0,1500).text())+'\n…(tệp lớn, đã cắt bớt; dùng file_read/file_search để đọc tiếp)')}
  if(imgs.length)content=[{type:'text',text:t||'Xem ảnh đính kèm.'},...imgs];else content=t;
  $('#in').value='';pend=[];showPend();cur.msgs.push({role:'user',content,show:txt,files});render();renderList();busy=true;ctl=new AbortController();setBtn();
  try{for(let i=0;i<8;i++){
   const m=await turn(cur);cur.msgs.push(m);if(!m.tool_calls)break;
   for(const t of m.tool_calls){let a={};try{a=JSON.parse(t.function.arguments||'{}')}catch{}
-   cur.msgs.push({role:'tool',tool_call_id:t.id,content:String(run(t.function.name,a))})}
+   cur.msgs.push({role:'tool',tool_call_id:t.id,content:String(await run(t.function.name,a))})}
   render()}}catch(e){if(e.name!='AbortError')err('Lỗi: '+e.message)}
  busy=false;S('chats',chats);setBtn();render()}
 
@@ -119,7 +134,7 @@ function render(){$('#w').innerHTML=cur?.msgs.length?'':'<h1 class="hi">Xin chà
 function renderList(){$('#list').innerHTML=chats.map(c=>`<div class="it ${c===cur?'on':''}" onclick="openChat(${c.id})"><span>${esc(c.title)}</span><span onclick="event.stopPropagation();delChat(${c.id})">×</span></div>`).join('')}
 function newChat(){cur=null;render();renderList();$('aside').classList.remove('open')}
 function openChat(id){cur=chats.find(c=>c.id==id);render();renderList();$('aside').classList.remove('open')}
-function delChat(id){chats=chats.filter(c=>c.id!=id);S('chats',chats);if(cur?.id==id)cur=null;render();renderList()}
+function delChat(id){chats.find(c=>c.id==id)?.files?.forEach(f=>idb('delete',id+'/'+f.name));chats=chats.filter(c=>c.id!=id);S('chats',chats);if(cur?.id==id)cur=null;render();renderList()}
 const setBtn=()=>$('#go').textContent=busy?'Dừng':'Gửi';
 $('#go').onclick=()=>busy?ctl.abort():send();
 $('#in').addEventListener('keydown',e=>{if(e.key=='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}});
@@ -146,10 +161,25 @@ const shrink=f=>new Promise(r=>{const i=new Image(),u=URL.createObjectURL(f);
  i.onload=()=>{const k=Math.min(1,1280/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);
   const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(i,0,0,c.width,c.height);URL.revokeObjectURL(u);r(c.toDataURL('image/jpeg',.85))};
  i.onerror=()=>r('');i.src=u});
-async function addFiles(fs){for(const f of fs){
- if(f.type.startsWith('image/')){const d=await shrink(f);d?pend.push({name:f.name,img:d}):err('Không đọc được ảnh '+f.name)}
- else if(f.size<300000&&(f.type.startsWith('text/')||/\.(txt|md|json|csv|js|ts|py|lua|html|css|xml|yml|yaml|log|sh|c|h|m|mm|xm|java|go|rs|php|sql|plist|makefile|ini|toml)$/i.test(f.name)))pend.push({name:f.name,text:await f.text()});
- else err('Không đọc được '+f.name+' (hỗ trợ ảnh và tệp văn bản/mã dưới 300 KB).')}
+const libs={},lib=u=>libs[u]??=new Promise((ok,no)=>{const e=document.createElement('script');e.src=u;e.onload=ok;e.onerror=()=>no(Error('không tải được thư viện đọc tệp'));document.head.appendChild(e)});
+const DB=new Promise(r=>{const q=indexedDB.open('files',1);q.onupgradeneeded=()=>q.result.createObjectStore('f');q.onsuccess=()=>r(q.result)});
+const idb=async(m,...a)=>{const d=await DB;return new Promise(r=>{const q=d.transaction('f',m=='get'?'readonly':'readwrite').objectStore('f')[m](...a);q.onsuccess=()=>r(q.result);q.onerror=()=>{err('Không lưu được tệp (có thể hết dung lượng).');r(null)}})};
+const PDF='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+async function pdfText(f){await lib(PDF+'pdf.min.js');pdfjsLib.GlobalWorkerOptions.workerSrc=PDF+'pdf.worker.min.js';
+ const d=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;let t='';
+ for(let i=1;i<=d.numPages;i++){const c=await(await d.getPage(i)).getTextContent();t+='\n\n--- Trang '+i+' ---\n'+c.items.map(x=>x.str+(x.hasEOL?'\n':' ')).join('')}
+ return t.trim()}
+async function zipEntries(f){await lib('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');const z=await JSZip.loadAsync(f),out=[];
+ for(const e of Object.values(z.files)){if(out.length>=2000)break;if(e.dir||/(^|\/)(__MACOSX|\.git|node_modules)\//.test(e.name)||/\.DS_Store$/.test(e.name))continue;
+  const u=await e.async('uint8array');if(u.length>5e6||u.subarray(0,4096).includes(0))continue;out.push({name:e.name,text:new TextDecoder().decode(u)})}
+ return out}
+async function addFiles(fs){for(const f of fs){try{
+ const lim=f.type.startsWith('image/')||/\.(zip|pdf)$/i.test(f.name)?3e8:2e9;if(f.size>lim)throw Error('quá lớn (tối đa '+lim/1e6+' MB)');
+ if(f.type.startsWith('image/')){const d=await shrink(f);if(!d)throw Error('không đọc được ảnh');pend.push({name:f.name,img:d})}
+ else if(/\.pdf$/i.test(f.name)||f.type=='application/pdf'){const t=await pdfText(f);if(!t.replace(/--- Trang \d+ ---/g,'').trim())throw Error('PDF không có lớp chữ (có thể là bản scan)');pend.push({name:f.name,blob:new Blob([t])})}
+ else if(/\.zip$/i.test(f.name)){const es=await zipEntries(f);if(!es.length)throw Error('zip không có tệp văn bản');pend.push({name:f.name,entries:es})}
+ else if(new Uint8Array(await f.slice(0,4096).arrayBuffer()).includes(0))throw Error('tệp nhị phân, chưa hỗ trợ');
+ else pend.push({name:f.name,blob:f})}catch(e){err(f.name+': '+e.message)}}
  showPend()}
 function showPend(){$('#pend').innerHTML=pend.map((p,i)=>`<span class="t">📎 ${esc(p.name)}<b onclick="pend.splice(${i},1);showPend()" title="Bỏ tệp">×</b></span>`).join('')}
 $('#in').addEventListener('paste',e=>{if(e.clipboardData.files.length){e.preventDefault();addFiles([...e.clipboardData.files])}});
