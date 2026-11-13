@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Trợ lý</title>
+<style>
+:root{--bg:#faf9f5;--side:#f0eee6;--tx:#29261b;--mu:#73726c;--ac:#c96442;--bd:#e3dfd3;--card:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#262624;--side:#1f1e1d;--tx:#eceae1;--mu:#a09f97;--bd:#3d3c38;--card:#30302e}}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{display:flex;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,sans-serif}
+aside{width:260px;background:var(--side);display:flex;flex-direction:column;padding:12px;gap:6px;border-right:1px solid var(--bd)}
+button,input,textarea{font:inherit;color:inherit}
+button,.btn{background:none;border:1px solid var(--bd);border-radius:8px;padding:6px 10px;cursor:pointer;display:inline-block}
+button:hover,.btn:hover{background:var(--card)}button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+button:focus-visible{outline:2px solid var(--ac)}
+#list{flex:1;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.it{padding:7px 9px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:6px}
+.it span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.it.on,.it:hover{background:var(--bd)}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+#mb{display:none;margin:8px}
+#msgs{flex:1;overflow:auto;padding:24px 16px}.w{max-width:720px;margin:0 auto}
+.hi{font:400 32px Georgia,serif;margin:20vh 0 0}
+.m{margin:0 0 20px}.u{background:var(--side);padding:10px 14px;border-radius:14px;margin-left:auto;width:fit-content;max-width:85%;white-space:pre-wrap}
+.a{font:16.5px/1.65 Georgia,serif}.a p{margin:0 0 12px}.er{color:#b3261e}
+.t{font:13px system-ui;color:var(--mu);border:1px solid var(--bd);border-radius:8px;padding:2px 8px;margin:4px 4px 0 0;display:inline-block}
+pre{background:var(--side);padding:10px;border-radius:8px;overflow:auto;font-size:13px}code{background:var(--side);padding:1px 4px;border-radius:4px}pre code{padding:0;background:none}
+#bar{padding:0 16px 16px}
+#box{max-width:720px;margin:0 auto;border:1px solid var(--bd);background:var(--card);border-radius:18px;padding:10px;display:flex;gap:8px;align-items:flex-end}
+#in{flex:1;border:0;outline:0;background:none;resize:none;max-height:200px}
+#at{width:36px;height:36px;border-radius:50%;padding:0;font-size:22px;line-height:1;flex:none}
+#pend{max-width:720px;margin:0 auto 8px;display:flex;flex-wrap:wrap}#pend b{cursor:pointer;margin-left:6px}
+dialog{background:var(--bg);color:var(--tx);border:1px solid var(--bd);border-radius:16px;width:min(620px,94vw);max-height:86vh;padding:16px}
+dialog::backdrop{background:#0006}
+#pn{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+#pn input:not([type=checkbox]),#pn textarea{width:100%;border:1px solid var(--bd);border-radius:8px;padding:7px 9px;background:var(--card)}
+.row{display:flex;gap:8px;align-items:center}.row span{flex:1;color:var(--mu);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:700px){aside{position:fixed;inset:0 25% 0 0;z-index:5;transform:translateX(-100%)}aside.open{transform:none}#mb{display:block;align-self:flex-start}}
+</style></head><body>
+<aside>
+ <button class="p" onclick="newChat()">+ Cuộc trò chuyện mới</button>
+ <div id="list"></div>
+ <button onclick="openP('sk')">Skills</button><button onclick="openP('mm')">Bộ nhớ</button><button onclick="openP('cfg')">Cài đặt</button>
+</aside>
+<main>
+ <button id="mb" onclick="document.querySelector('aside').classList.toggle('open')">☰</button>
+ <div id="msgs"><div class="w" id="w"></div></div>
+ <div id="bar"><div id="pend"></div><div id="box"><button id="at" title="Đính kèm tệp" aria-label="Đính kèm tệp" onclick="$('#fi').click()">+</button><input id="fi" type="file" multiple hidden onchange="addFiles([...this.files]);this.value=''"><textarea id="in" rows="1" placeholder="Nhắn tin cho trợ lý…"></textarea><button class="p" id="go">Gửi</button></div></div>
+</main>
+<dialog id="dlg">
+ <div class="row" id="tabs"><button data-t="sk" onclick="panel('sk')">Skills</button><button data-t="mm" onclick="panel('mm')">Bộ nhớ</button><button data-t="cfg" onclick="panel('cfg')">Cài đặt</button><span></span><button onclick="$('#dlg').close()">Đóng</button></div>
+ <div id="pn"></div>
+</dialog>
+<script>
+// Cảnh báo: khóa API đặt sẵn ở đây sẽ lộ cho bất kỳ ai xem mã nguồn trang. Chỉ dùng cá nhân/cục bộ.
+const BASE='https://motapis.com/v1',KEY='sk-18F7gcha0AfmY72pgD3bK2k9GaP1K2qhZ9uNRPfT0rGzy6WQ';
+const $=s=>document.querySelector(s),L=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},S=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{err('Hết dung lượng lưu trữ của trình duyệt, hãy xóa bớt cuộc trò chuyện có ảnh.')}};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let cfg={base:BASE,key:KEY,model:'',sys:'',...L('cfg',{})},chats=L('chats',[]),skills=L('skills',[]),mem=L('mem',{}),cur=null,busy=false,ctl,pend=[];
+
+function md(s){const cb=[];
+ s=esc(s).replace(/```(\w*)\n?([\s\S]*?)(```|$)/g,(_,l,c)=>'\0'+(cb.push('<pre><code>'+c+'</code></pre>')-1)+'\0');
+ s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>').replace(/(^|\s)\*([^*\n]+)\*/g,'$1<i>$2</i>')
+  .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>')
+  .replace(/^#{1,6} (.+)$/gm,'<h4>$1</h4>').replace(/^[-*] (.+)$/gm,'<li>$1</li>').replace(/(<li>.*<\/li>\n?)+/g,m=>'<ul>'+m+'</ul>');
+ return s.split(/\n{2,}/).map(p=>/^(<(h4|ul)|\0)/.test(p.trim())?p:'<p>'+p.replace(/\n/g,'<br>')+'</p>').join('').replace(/\0(\d+)\0/g,(_,i)=>cb[i])}
+
+// Công cụ cho bot: bộ nhớ dạng file + nạp skill
+const TOOLS=[['memory_list','Liệt kê các file bộ nhớ',[]],['memory_read','Đọc một file bộ nhớ',['path']],
+ ['memory_write','Tạo/ghi đè file bộ nhớ, dùng để lưu thông tin bền vững về người dùng',['path','content']],
+ ['memory_delete','Xóa một file bộ nhớ',['path']],['load_skill','Nạp hướng dẫn đầy đủ của một skill',['name']]]
+ .map(([name,description,r])=>({type:'function',function:{name,description,parameters:{type:'object',properties:Object.fromEntries(r.map(k=>[k,{type:'string'}])),required:r}}}));
+function run(n,a){
+ if(n=='memory_list')return Object.keys(mem).map(k=>k+' ('+mem[k].length+' ký tự)').join('\n')||'(trống)';
+ if(n=='memory_read')return mem[a.path]??'Không có file '+a.path;
+ if(n=='memory_write'){mem[a.path]=a.content;S('mem',mem);return 'Đã lưu '+a.path}
+ if(n=='memory_delete'){delete mem[a.path];S('mem',mem);return 'Đã xóa '+a.path}
+ if(n=='load_skill'){const k=skills.find(s=>s.name==a.name&&s.on!==false);return k?k.body:'Không có skill '+a.name}
+ return 'Công cụ không tồn tại'}
+const sysPrompt=()=>[cfg.sys||'Bạn là trợ lý hữu ích. Trả lời bằng ngôn ngữ của người dùng.',
+ 'Bộ nhớ lâu dài gồm các file. Dùng memory_list/memory_read để xem, memory_write để lưu thông tin bền vững về người dùng (không lưu mật khẩu hay khóa API). Hiện có: '+(Object.keys(mem).join(', ')||'chưa có file nào')+'.',
+ skills.some(s=>s.on!==false)?'Skills khả dụng, gọi load_skill khi yêu cầu khớp mô tả:\n'+skills.filter(s=>s.on!==false).map(s=>'- '+s.name+': '+s.desc).join('\n'):''].filter(Boolean).join('\n\n');
+
+async function turn(c){
+ const body={model:cfg.model,stream:true,tools:TOOLS,messages:[{role:'system',content:sysPrompt()},...c.msgs.map(({role,content,tool_calls,tool_call_id})=>({role,content,tool_calls,tool_call_id}))]};
+ const r=await fetch(cfg.base.replace(/\/$/,'')+'/chat/completions',{method:'POST',signal:ctl.signal,headers:{'Content-Type':'application/json',Authorization:'Bearer '+cfg.key},body:JSON.stringify(body)});
+ if(!r.ok)throw Error(r.status+' '+(await r.text()).slice(0,300));
+ const m={role:'assistant',content:''},el=addMsg(m),rd=r.body.getReader(),dc=new TextDecoder(),tc=[];let buf='';
+ for(;;){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const ls=buf.split('\n');buf=ls.pop();
+  for(const l of ls){if(!l.startsWith('data:'))continue;const d=l.slice(5).trim();if(d=='[DONE]')continue;let j;try{j=JSON.parse(d)}catch{continue}
+   const dl=j.choices?.[0]?.delta;if(!dl)continue;if(dl.content)m.content+=dl.content;
+   for(const t of dl.tool_calls||[]){const x=tc[t.index??0]??={id:'',type:'function',function:{name:'',arguments:''}};
+    if(t.id)x.id=t.id;if(t.function?.name)x.function.name+=t.function.name;if(t.function?.arguments)x.function.arguments+=t.function.arguments}
+   draw(el,m,tc)}}
+ const calls=tc.filter(Boolean);calls.forEach(t=>t.id||=('call_'+Math.random().toString(36).slice(2)));
+ if(calls.length){m.tool_calls=calls;if(!m.content)m.content=null}else if(!m.content)m.content='(không có phản hồi)';
+ return m}
+
+async function send(){
+ const txt=$('#in').value.trim();if((!txt&&!pend.length)||busy)return;
+ if(!cfg.model){openP('cfg');return}
+ if(!cur){cur={id:Date.now(),title:(txt||pend[0].name).slice(0,40),msgs:[]};chats.unshift(cur)}
+ let content=txt,t=txt;const files=[],imgs=[];
+ for(const p of pend){if(p.img)imgs.push({type:'image_url',image_url:{url:p.img}});else{files.push(p.name);t+='\n\n[Tệp: '+p.name+']\n```\n'+p.text+'\n```'}}
+ if(imgs.length)content=[{type:'text',text:t||'Xem ảnh đính kèm.'},...imgs];else content=t;
+ $('#in').value='';pend=[];showPend();cur.msgs.push({role:'user',content,show:txt,files});render();renderList();busy=true;ctl=new AbortController();setBtn();
+ try{for(let i=0;i<8;i++){
+  const m=await turn(cur);cur.msgs.push(m);if(!m.tool_calls)break;
+  for(const t of m.tool_calls){let a={};try{a=JSON.parse(t.function.arguments||'{}')}catch{}
+   cur.msgs.push({role:'tool',tool_call_id:t.id,content:String(run(t.function.name,a))})}
+  render()}}catch(e){if(e.name!='AbortError')err('Lỗi: '+e.message)}
+ busy=false;S('chats',chats);setBtn();render()}
+
+function draw(e,m,tc=m.tool_calls||[]){
+ if(m.role=='user'){e.className='m u';e.textContent=m.show??(typeof m.content=='string'?m.content:'');
+  (m.files||[]).forEach(n=>{const s=document.createElement('div');s.className='t';s.textContent='📎 '+n;e.appendChild(s)});
+  if(Array.isArray(m.content))m.content.filter(p=>p.type=='image_url').forEach(p=>{const i=new Image();i.src=p.image_url.url;i.alt='Ảnh đính kèm';i.style.cssText='display:block;max-width:240px;border-radius:8px;margin-top:6px';e.appendChild(i)});return}
+ e.innerHTML=md(m.content||'')+tc.filter(Boolean).map(t=>`<div class="t">⚙ ${esc(t.function.name)}</div>`).join('');
+ const s=$('#msgs');s.scrollTop=s.scrollHeight}
+function addMsg(m){const e=document.createElement('div');e.className='m a';$('#w').appendChild(e);draw(e,m);return e}
+function render(){$('#w').innerHTML=cur?.msgs.length?'':'<h1 class="hi">Xin chào, hôm nay bạn muốn làm gì?</h1>';(cur?.msgs||[]).forEach(m=>m.role!='tool'&&addMsg(m))}
+function renderList(){$('#list').innerHTML=chats.map(c=>`<div class="it ${c===cur?'on':''}" onclick="openChat(${c.id})"><span>${esc(c.title)}</span><span onclick="event.stopPropagation();delChat(${c.id})">×</span></div>`).join('')}
+function newChat(){cur=null;render();renderList();$('aside').classList.remove('open')}
+function openChat(id){cur=chats.find(c=>c.id==id);render();renderList();$('aside').classList.remove('open')}
+function delChat(id){chats=chats.filter(c=>c.id!=id);S('chats',chats);if(cur?.id==id)cur=null;render();renderList()}
+const setBtn=()=>$('#go').textContent=busy?'Dừng':'Gửi';
+$('#go').onclick=()=>busy?ctl.abort():send();
+$('#in').addEventListener('keydown',e=>{if(e.key=='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}});
+
+async function models(){try{const r=await fetch(cfg.base.replace(/\/$/,'')+'/models',{headers:{Authorization:'Bearer '+cfg.key}}),ids=((await r.json()).data||[]).map(x=>x.id),dl=$('#ml');
+ if(dl)dl.innerHTML=ids.map(i=>`<option value="${esc(i)}">`).join('');if(!cfg.model&&ids[0]){cfg.model=ids[0];S('cfg',cfg);const i=$('#c3');if(i)i.value=cfg.model}}catch{}}
+function openP(t){panel(t);$('#dlg').showModal()}
+function panel(t){const d=$('#pn');document.querySelectorAll('#tabs [data-t]').forEach(b=>b.classList.toggle('p',b.dataset.t==t));
+ if(t=='cfg'){d.innerHTML=`<label>API base<input id="c1" value="${esc(cfg.base)}"></label><label>API key<input id="c2" type="password" value="${esc(cfg.key)}"></label><label>Model<input id="c3" list="ml" value="${esc(cfg.model)}"></label><datalist id="ml"></datalist><label>Chỉ dẫn hệ thống<textarea id="c4" rows="4">${esc(cfg.sys)}</textarea></label><button class="p" onclick="saveCfg()">Lưu</button>`;models()}
+ if(t=='sk'){d.innerHTML=skills.map((s,i)=>`<div class="row"><input type="checkbox" ${s.on!==false?'checked':''} onchange="skills[${i}].on=this.checked;S('skills',skills)"><b>${esc(s.name)}</b><span>${esc(s.desc)}</span><button onclick="editSk(${i})">Sửa</button><button onclick="skills.splice(${i},1);S('skills',skills);panel('sk')">Xóa</button></div>`).join('')
+  +`<hr><input id="s1" placeholder="Tên skill (vd: viet-email)"><input id="s2" placeholder="Mô tả: khi nào dùng skill này"><textarea id="s3" rows="6" placeholder="Hướng dẫn chi tiết (nội dung SKILL.md)"></textarea><input type="hidden" id="s0" value="-1"><div class="row"><button class="p" onclick="saveSk()">Lưu skill</button><label class="btn">Nhập SKILL.md<input type="file" accept=".md,.txt" hidden onchange="impSk(this)"></label></div>`}
+ if(t=='mm'){d.innerHTML=(Object.keys(mem).map(k=>`<div class="row"><b>${esc(k)}</b><span>${mem[k].length} ký tự</span><button data-k="${esc(k)}" onclick="editMm(this.dataset.k)">Sửa</button><button data-k="${esc(k)}" onclick="delete mem[this.dataset.k];S('mem',mem);panel('mm')">Xóa</button></div>`).join('')||'<p>Chưa có file nào. Bot tự ghi khi bạn kể thông tin lâu dài, hoặc tạo tay ở dưới.</p>')
+  +`<hr><input id="m1" placeholder="/profile.md"><textarea id="m2" rows="8"></textarea><button class="p" onclick="saveMm()">Lưu file</button>`}}
+function saveCfg(){cfg={...cfg,base:$('#c1').value.trim(),key:$('#c2').value.trim(),model:$('#c3').value.trim(),sys:$('#c4').value};S('cfg',cfg);$('#dlg').close()}
+function editSk(i){const s=skills[i];$('#s0').value=i;$('#s1').value=s.name;$('#s2').value=s.desc;$('#s3').value=s.body}
+function saveSk(){const n=$('#s1').value.trim().replace(/\s+/g,'-'),i=+$('#s0').value;if(!n)return;const s={name:n,desc:$('#s2').value.trim(),body:$('#s3').value,on:true};i>=0?skills[i]=s:skills.push(s);S('skills',skills);panel('sk')}
+function impSk(f){const r=new FileReader();r.onload=()=>{const t=r.result,m=t.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/),g=k=>(m?.[1].match(new RegExp('^'+k+':\\s*(.+)$','m'))||[])[1]||'';
+ $('#s1').value=g('name')||f.files[0].name.replace(/\.\w+$/,'');$('#s2').value=g('description');$('#s3').value=m?m[2]:t};r.readAsText(f.files[0])}
+function editMm(k){$('#m1').value=k;$('#m2').value=mem[k]}
+function saveMm(){const k=$('#m1').value.trim();if(!k)return;mem[k.startsWith('/')?k:'/'+k]=$('#m2').value;S('mem',mem);panel('mm')}
+
+const err=t=>{const d=document.createElement('div');d.className='m er';d.textContent=t;$('#w').appendChild(d)};
+const shrink=f=>new Promise(r=>{const i=new Image(),u=URL.createObjectURL(f);
+ i.onload=()=>{const k=Math.min(1,1280/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=Math.round(i.width*k);c.height=Math.round(i.height*k);
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(i,0,0,c.width,c.height);URL.revokeObjectURL(u);r(c.toDataURL('image/jpeg',.85))};
+ i.onerror=()=>r('');i.src=u});
+async function addFiles(fs){for(const f of fs){
+ if(f.type.startsWith('image/')){const d=await shrink(f);d?pend.push({name:f.name,img:d}):err('Không đọc được ảnh '+f.name)}
+ else if(f.size<300000&&(f.type.startsWith('text/')||/\.(txt|md|json|csv|js|ts|py|lua|html|css|xml|yml|yaml|log|sh|c|h|m|mm|xm|java|go|rs|php|sql|plist|makefile|ini|toml)$/i.test(f.name)))pend.push({name:f.name,text:await f.text()});
+ else err('Không đọc được '+f.name+' (hỗ trợ ảnh và tệp văn bản/mã dưới 300 KB).')}
+ showPend()}
+function showPend(){$('#pend').innerHTML=pend.map((p,i)=>`<span class="t">📎 ${esc(p.name)}<b onclick="pend.splice(${i},1);showPend()" title="Bỏ tệp">×</b></span>`).join('')}
+$('#in').addEventListener('paste',e=>{if(e.clipboardData.files.length){e.preventDefault();addFiles([...e.clipboardData.files])}});
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>{e.preventDefault();addFiles([...e.dataTransfer.files])});
+
+render();renderList();if(!cfg.model)models();
+</script></body></html>
