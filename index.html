@@ -37,7 +37,7 @@ dialog::backdrop{background:#0006}
 <aside>
  <button class="p" onclick="newChat()">+ Cuộc trò chuyện mới</button>
  <div id="list"></div>
- <button onclick="openP('sk')">Skills</button><button onclick="openP('mm')">Bộ nhớ</button><button onclick="openP('cfg')">Cài đặt</button>
+ <div id="ks" style="font-size:12px;color:var(--mu);padding:2px 4px"></div><button onclick="openP('sk')">Skills</button><button onclick="openP('mm')">Bộ nhớ</button><button onclick="openP('cfg')">Cài đặt</button>
 </aside>
 <main>
  <button id="mb" onclick="document.querySelector('aside').classList.toggle('open')">☰</button>
@@ -50,11 +50,18 @@ dialog::backdrop{background:#0006}
 </dialog>
 <script>
 // Cảnh báo: khóa API đặt sẵn ở đây sẽ lộ cho bất kỳ ai xem mã nguồn trang. Chỉ dùng cá nhân/cục bộ.
-const BASE='https://motapis.com/v1',KEY='sk-18F7gcha0AfmY72pgD3bK2k9GaP1K2qhZ9uNRPfT0rGzy6WQ';
+const BASE='https://motapis.com/v1',KEYS=[
+ 'sk-18F7gcha0AfmY72pgD3bK2k9GaP1K2qhZ9uNRPfT0rGzy6WQ',
+ 'sk-uxS92oDCTRwqcHd3e2MsjZzX621VrdnJimO7UqZSdFboZwWL',
+ 'sk-LgQNV0gKMvK69uArQTujAcAQ7hgqHhum3fVzjMoBwoPPWZeh',
+ 'sk-CoKjyEX9aledHLZvTEfqEcOEVjNvzClW31XI1HljUy6JT6Sr',
+ 'sk-KdoMthQ1CJYaETFBdbf9jKDVt5ffSwYaGYlGjpCJXiqjea9h'];
 const $=s=>document.querySelector(s),L=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},S=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{err('Hết dung lượng lưu trữ của trình duyệt, hãy xóa bớt cuộc trò chuyện có ảnh.')}};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let cfg={base:BASE,key:KEY,model:'',sys:'',...L('cfg',{})},chats=L('chats',[]),skills=L('skills',[]),mem=L('mem',{}),cur=null,busy=false,ctl,pend=[];
+let cfg={base:BASE,keys:KEYS,ki:0,model:'',sys:'',...L('cfg',{})},chats=L('chats',[]),skills=L('skills',[]),mem=L('mem',{}),cur=null,busy=false,ctl,pend=[];
 
+if(cfg.key){cfg.keys=[...new Set([cfg.key,...cfg.keys])];delete cfg.key}if(!cfg.keys.length)cfg.keys=KEYS;
+const K=()=>cfg.keys[cfg.ki%cfg.keys.length];
 function md(s){const cb=[];
  s=esc(s).replace(/```(\w*)\n?([\s\S]*?)(```|$)/g,(_,l,c)=>'\0'+(cb.push('<pre><code>'+c+'</code></pre>')-1)+'\0');
  s=s.replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>').replace(/(^|\s)\*([^*\n]+)\*/g,'$1<i>$2</i>')
@@ -90,8 +97,13 @@ const sysPrompt=()=>[cfg.sys||'Bạn là trợ lý hữu ích. Trả lời bằn
 
 async function turn(c){
  const body={model:cfg.model,stream:true,tools:TOOLS,messages:[{role:'system',content:sysPrompt()},...c.msgs.map(({role,content,tool_calls,tool_call_id})=>({role,content,tool_calls,tool_call_id}))]};
- const r=await fetch(cfg.base.replace(/\/$/,'')+'/chat/completions',{method:'POST',signal:ctl.signal,headers:{'Content-Type':'application/json',Authorization:'Bearer '+cfg.key},body:JSON.stringify(body)});
- if(!r.ok)throw Error(r.status+' '+(await r.text()).slice(0,300));
+ let r,last='';
+ for(let n=0;n<cfg.keys.length;n++){
+  r=await fetch(cfg.base.replace(/\/$/,'')+'/chat/completions',{method:'POST',signal:ctl.signal,headers:{'Content-Type':'application/json',Authorization:'Bearer '+K()},body:JSON.stringify(body)});
+  if(r.ok)break;
+  last=r.status+' '+(await r.text()).slice(0,300);
+  if(!([401,402,403,429].includes(r.status)||/quota|insufficient|balance|credit|exhaust/i.test(last))||n==cfg.keys.length-1)throw Error(last);
+  cfg.ki=(cfg.ki+1)%cfg.keys.length;S('cfg',cfg);showKey();info('Key lỗi hoặc hết token ('+r.status+'), đã chuyển sang key '+(cfg.ki+1)+'/'+cfg.keys.length)}
  const m={role:'assistant',content:''},el=addMsg(m),rd=r.body.getReader(),dc=new TextDecoder(),tc=[];let buf='';
  for(;;){const{done,value}=await rd.read();if(done)break;buf+=dc.decode(value,{stream:true});const ls=buf.split('\n');buf=ls.pop();
   for(const l of ls){if(!l.startsWith('data:'))continue;const d=l.slice(5).trim();if(d=='[DONE]')continue;let j;try{j=JSON.parse(d)}catch{continue}
@@ -139,16 +151,16 @@ const setBtn=()=>$('#go').textContent=busy?'Dừng':'Gửi';
 $('#go').onclick=()=>busy?ctl.abort():send();
 $('#in').addEventListener('keydown',e=>{if(e.key=='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}});
 
-async function models(){try{const r=await fetch(cfg.base.replace(/\/$/,'')+'/models',{headers:{Authorization:'Bearer '+cfg.key}}),ids=((await r.json()).data||[]).map(x=>x.id),dl=$('#ml');
+async function models(){try{const r=await fetch(cfg.base.replace(/\/$/,'')+'/models',{headers:{Authorization:'Bearer '+K()}}),ids=((await r.json()).data||[]).map(x=>x.id),dl=$('#ml');
  if(dl)dl.innerHTML=ids.map(i=>`<option value="${esc(i)}">`).join('');if(!cfg.model&&ids[0]){cfg.model=ids[0];S('cfg',cfg);const i=$('#c3');if(i)i.value=cfg.model}}catch{}}
 function openP(t){panel(t);$('#dlg').showModal()}
 function panel(t){const d=$('#pn');document.querySelectorAll('#tabs [data-t]').forEach(b=>b.classList.toggle('p',b.dataset.t==t));
- if(t=='cfg'){d.innerHTML=`<label>API base<input id="c1" value="${esc(cfg.base)}"></label><label>API key<input id="c2" type="password" value="${esc(cfg.key)}"></label><label>Model<input id="c3" list="ml" value="${esc(cfg.model)}"></label><datalist id="ml"></datalist><label>Chỉ dẫn hệ thống<textarea id="c4" rows="4">${esc(cfg.sys)}</textarea></label><button class="p" onclick="saveCfg()">Lưu</button>`;models()}
+ if(t=='cfg'){d.innerHTML=`<label>API base<input id="c1" value="${esc(cfg.base)}"></label><label>API keys (mỗi dòng một key, tự chuyển sang key kế tiếp khi hết token)<textarea id="c2" rows="5" style="font-family:monospace">${esc(cfg.keys.join('\n'))}</textarea></label><label>Model<input id="c3" list="ml" value="${esc(cfg.model)}"></label><datalist id="ml"></datalist><label>Chỉ dẫn hệ thống<textarea id="c4" rows="4">${esc(cfg.sys)}</textarea></label><button class="p" onclick="saveCfg()">Lưu</button>`;models()}
  if(t=='sk'){d.innerHTML=skills.map((s,i)=>`<div class="row"><input type="checkbox" ${s.on!==false?'checked':''} onchange="skills[${i}].on=this.checked;S('skills',skills)"><b>${esc(s.name)}</b><span>${esc(s.desc)}</span><button onclick="editSk(${i})">Sửa</button><button onclick="skills.splice(${i},1);S('skills',skills);panel('sk')">Xóa</button></div>`).join('')
   +`<hr><input id="s1" placeholder="Tên skill (vd: viet-email)"><input id="s2" placeholder="Mô tả: khi nào dùng skill này"><textarea id="s3" rows="6" placeholder="Hướng dẫn chi tiết (nội dung SKILL.md)"></textarea><input type="hidden" id="s0" value="-1"><div class="row"><button class="p" onclick="saveSk()">Lưu skill</button><label class="btn">Nhập SKILL.md<input type="file" accept=".md,.txt" hidden onchange="impSk(this)"></label></div>`}
  if(t=='mm'){d.innerHTML=(Object.keys(mem).map(k=>`<div class="row"><b>${esc(k)}</b><span>${mem[k].length} ký tự</span><button data-k="${esc(k)}" onclick="editMm(this.dataset.k)">Sửa</button><button data-k="${esc(k)}" onclick="delete mem[this.dataset.k];S('mem',mem);panel('mm')">Xóa</button></div>`).join('')||'<p>Chưa có file nào. Bot tự ghi khi bạn kể thông tin lâu dài, hoặc tạo tay ở dưới.</p>')
   +`<hr><input id="m1" placeholder="/profile.md"><textarea id="m2" rows="8"></textarea><button class="p" onclick="saveMm()">Lưu file</button>`}}
-function saveCfg(){cfg={...cfg,base:$('#c1').value.trim(),key:$('#c2').value.trim(),model:$('#c3').value.trim(),sys:$('#c4').value};S('cfg',cfg);$('#dlg').close()}
+function saveCfg(){cfg={...cfg,base:$('#c1').value.trim(),keys:$('#c2').value.split(/\s+/).filter(Boolean),ki:0,model:$('#c3').value.trim(),sys:$('#c4').value};if(!cfg.keys.length)cfg.keys=KEYS;S('cfg',cfg);showKey();$('#dlg').close()}
 function editSk(i){const s=skills[i];$('#s0').value=i;$('#s1').value=s.name;$('#s2').value=s.desc;$('#s3').value=s.body}
 function saveSk(){const n=$('#s1').value.trim().replace(/\s+/g,'-'),i=+$('#s0').value;if(!n)return;const s={name:n,desc:$('#s2').value.trim(),body:$('#s3').value,on:true};i>=0?skills[i]=s:skills.push(s);S('skills',skills);panel('sk')}
 function impSk(f){const r=new FileReader();r.onload=()=>{const t=r.result,m=t.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/),g=k=>(m?.[1].match(new RegExp('^'+k+':\\s*(.+)$','m'))||[])[1]||'';
@@ -186,5 +198,7 @@ $('#in').addEventListener('paste',e=>{if(e.clipboardData.files.length){e.prevent
 document.addEventListener('dragover',e=>e.preventDefault());
 document.addEventListener('drop',e=>{e.preventDefault();addFiles([...e.dataTransfer.files])});
 
-render();renderList();if(!cfg.model)models();
+const info=t=>{const d=document.createElement('div');d.className='t';d.textContent=t;$('#w').appendChild(d)};
+const showKey=()=>{$('#ks').textContent='Key đang dùng: '+(cfg.ki%cfg.keys.length+1)+'/'+cfg.keys.length};
+render();renderList();showKey();if(!cfg.model)models();
 </script></body></html>
